@@ -319,6 +319,7 @@ def getFormsDIRKIMEX(F, Fexp, ks, khats, butch, t, dt, u0, bcs=None):
     Fhat = inner(khat, vhat)*dx + component_replace(Fexp, replhat)
 
     bcnew = []
+    bcexpl = []
 
     # For the DIRK-IMEX case, we need one new BC for each old one
     # (rather than one per stage), but we need a `Function` inside of
@@ -332,6 +333,10 @@ def getFormsDIRKIMEX(F, Fexp, ks, khats, butch, t, dt, u0, bcs=None):
     d_val = MC.Constant(1.0)
 
     for bc in bcs:
+
+        # Create zero Dirichlet BCs to pass to mass solver
+        bcexpl.append(bc.reconstruct(g=0.0))
+
         bcarg = as_ufl(bc._original_arg)
         bcarg_stage = replace(bcarg, {t: t+c*dt})
         if bcarg_stage == 0:
@@ -346,7 +351,7 @@ def getFormsDIRKIMEX(F, Fexp, ks, khats, butch, t, dt, u0, bcs=None):
         gdat /= dt*d_val
         bcnew.append(bc.reconstruct(g=gdat))
 
-    return stage_F, (k, g, a, c), bcnew, Fhat, (khat, ghat, chat), (a_vals, ahat_vals, d_val)
+    return stage_F, (k, g, a, c), bcnew, bcexpl, Fhat, (khat, ghat, chat), (a_vals, ahat_vals, d_val)
 
 
 class DIRKIMEXMethod:
@@ -359,7 +364,8 @@ class DIRKIMEXMethod:
     """
 
     def __init__(self, F, F_explicit, butcher_tableau, t, dt, u0, bcs=None,
-                 solver_parameters=None, mass_parameters=None, appctx=None, nullspace=None):
+                 solver_parameters=None, mass_parameters=None, appctx=None, nullspace=None,
+                 bc_expl=False):
         assert butcher_tableau.is_dirk_imex
 
         self.num_steps = 0
@@ -379,8 +385,8 @@ class DIRKIMEXMethod:
         self.ks = [Function(V) for _ in range(self.num_stages)]
         self.k_hat_s = [Function(V) for _ in range(self.num_stages)]
 
-        stage_F, (k, g, a, c), bcnew, Fhat, (khat, ghat, chat), (a_vals, ahat_vals, d_val) = getFormsDIRKIMEX(
-            F, F_explicit, self.ks, self.k_hat_s, butcher_tableau, t, dt, u0, bcs=bcs)
+        stage_F, (k, g, a, c), bcnew, bcexpl, Fhat, (khat, ghat, chat), (a_vals, ahat_vals, d_val) \
+            = getFormsDIRKIMEX(F, F_explicit, self.ks, self.k_hat_s, butcher_tableau, t, dt, u0, bcs=bcs)
 
         self.bcnew = bcnew
 
@@ -403,7 +409,12 @@ class DIRKIMEXMethod:
                                                  solver_parameters=solver_parameters,
                                                  nullspace=nullspace)
 
-        self.mass_problem = NonlinearVariationalProblem(Fhat, khat)
+        if bc_expl:
+            bcexpl_ = bcexpl
+        else:
+            bcexpl_ = None
+
+        self.mass_problem = NonlinearVariationalProblem(Fhat, khat, bcexpl_)
         self.mass_solver = NonlinearVariationalSolver(self.mass_problem,
                                                       solver_parameters=mass_parameters)
 
