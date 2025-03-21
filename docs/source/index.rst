@@ -148,6 +148,13 @@ and for general multistep methods:
 
    demos/demo_heat_multistep.py
 
+and for non-linearly partitioned RK methods:
+
+.. toctree::
+   :maxdepth: 1
+
+   demos/demo_burgers_nprk.py
+
 Or check out two IMEX-type methods for the monodomain equations:
 
 .. toctree::
