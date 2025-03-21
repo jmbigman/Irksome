@@ -372,8 +372,7 @@ class DIRKIMEXMethod:
     """
 
     def __init__(self, F, F_explicit, butcher_tableau, t, dt, u0, bcs=None,
-                 solver_parameters=None, mass_parameters=None, appctx=None, nullspace=None,
-                 bc_expl=False):
+                 solver_parameters=None, mass_parameters=None, appctx=None, nullspace=None):
         assert butcher_tableau.is_dirk_imex
 
         self.num_steps = 0
@@ -417,12 +416,7 @@ class DIRKIMEXMethod:
                                                  solver_parameters=solver_parameters,
                                                  nullspace=nullspace)
 
-        if bc_expl:
-            bcexpl_ = bcexpl
-        else:
-            bcexpl_ = None
-
-        self.mass_problem = NonlinearVariationalProblem(Fhat, khat, bcexpl_)
+        self.mass_problem = NonlinearVariationalProblem(Fhat, khat, bcexpl)
         self.mass_solver = NonlinearVariationalSolver(self.mass_problem,
                                                       solver_parameters=mass_parameters)
 
