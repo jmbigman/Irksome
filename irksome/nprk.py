@@ -2,88 +2,11 @@
 Buvoli and Southworth."""
 import numpy as np
 
-from firedrake import Function, split, \
-    NonlinearVariationalProblem, NonlinearVariationalSolver
+from firedrake import Function, NonlinearVariationalProblem, NonlinearVariationalSolver
 
-from ufl.form import Form
-from ufl.algorithms.analysis import extract_type
-
-from .deriv import TimeDerivative
+from .deriv import TimeDerivative, expand_time_derivatives
 from .tools import MeshConstant, replace
-from .manipulation import extract_terms
 from .nprk_tableaux import NPRKTableau
-
-
-def _has_len(x) -> bool:
-    """Checks if an object has a length"""
-
-    try:
-        _ = len(x)
-    except Exception:
-        return False
-
-    return True
-
-
-def _check_aux_t_dep(F: Form, u0: Function, u1: Function, u2: Function) -> tuple[np.ndarray]:
-    """Identifies which subfunctions are auxiliary (no time derivative)
-    and which are time-dependent. Also checks that variables are exactly
-    one of the two and that auxiliary variable do not appear in a partitioned
-    argument."""
-
-    num_fields = len(u0.function_space())
-
-    if num_fields == 1:
-        u0_bits = [u0]
-        u1_bits = [u1]
-        u2_bits = [u2]
-    else:
-        u0_bits = split(u0)
-        u1_bits = split(u1)
-        u2_bits = split(u2)
-
-    # Gather all time derivatives
-    derivs = extract_type(F, TimeDerivative)
-
-    # Gather all variables outside of a time derivative
-    types = {type(var) for var in u0_bits}
-    F_no_dt = extract_terms(F).remainder
-    vars_ = set().union(*(extract_type(F_no_dt, type_) for type_ in types))
-
-    # Indices of variables which are auxiliary and time-dependent
-    aux_list = np.array([], dtype=int)
-    t_dep_list = np.array([], dtype=int)
-
-    for i, (u0b, u1b, u2b) in enumerate(zip(u0_bits, u1_bits, u2_bits)):
-        # Vector spaces need each component checked
-        if _has_len(u0b):
-            is_aux = (all(ub_ in vars_ for ub_ in u0b)
-                      and all(TimeDerivative(ub_) not in derivs for ub_ in u0b))
-            is_t_dep = (all(TimeDerivative(ub_) in derivs for ub_ in u0b)
-                        and all(ub_ not in vars_ for ub_ in u0b))
-            in_args = (any(ub_ in vars_ for ub_ in u1b)
-                       and any(ub_ in vars_ for ub_ in u2b))
-        else:
-            is_aux = u0b in vars_ and TimeDerivative(u0b) not in derivs
-            is_t_dep = TimeDerivative(u0b) in derivs and u0b not in vars_
-            in_args = u1b in vars_ or u2b in vars_
-
-        if is_aux and is_t_dep:
-            raise RuntimeError(f"Variable {i} is both time-dependent and auxiliary.")
-
-        if not (is_aux or is_t_dep):
-            raise RuntimeError(f"Variable {i} is neither time-dependent nor auxiliary")
-
-        if is_aux and in_args:
-            raise RuntimeError(f"Variable {i} is auxiliary but used in an argument")
-
-        if is_aux:
-            aux_list = np.append(aux_list, i)
-
-        if is_t_dep:
-            t_dep_list = np.append(t_dep_list, i)
-
-    return aux_list, t_dep_list
 
 
 def getFormsNPRK(F, u0, u1, u2, t, dt):
@@ -138,7 +61,7 @@ def getFormsNPRK(F, u0, u1, u2, t, dt):
     return u_stage, u_tilde, u_exp, (a, c), F_arg1, F_arg2, k, u_arg1, u_arg2, F_mass
 
 
-class NPRKMethod:
+class NonlinearlyPartitionedRKTimeStepper:
     """Class for advancing a time-dependent PDE through a non-linearly partitioned
     Runge-Kutta (NPRK) method. This requires one form with three functions corresponding to
     the time derivatives/auxiliary terms, the first argument terms and the second argument terms.
@@ -161,6 +84,7 @@ class NPRKMethod:
                                  implicit solves in the second argument.
     :arg mass_parameters: A :class:`dict` of solver parameters that will be used in the mass
                           solves when the operator must be evaluated on previous stages.
+    :arg appctx: An optional :class:`dict` containing application context.
     :arg nullspace: An optional null space object.
     """
 
@@ -168,23 +92,16 @@ class NPRKMethod:
                  arg1_solver_parameters=None, arg2_solver_parameters=None,
                  mass_parameters=None, appctx=None, nullspace=None):
 
-        self.num_steps = 0
-
-        # Number of non-linear and linear iterations in solves in each argument
-        self.num_nonlinear_iterations = np.array([0, 0], dtype=int)
-        self.num_linear_iterations = np.array([0, 0], dtype=int)
-
-        self.num_mass_nonlinear_iterations = 0
-        self.num_mass_linear_iterations = 0
+        if bcs is None:
+            bcs = []
 
         self.tableau = nprk_tableau
 
         self.dt = dt
         self.u = u0
 
-        # (NOTE): Can use list of time-dependent variables to reduce the length of the loops
-        #         when summing over previous stages for a potential performance improvement
-        _ = _check_aux_t_dep(F, u0, u1, u2)
+        # preprocess time derivatives
+        F = expand_time_derivatives(F, t=t, timedep_coeffs=(u0,))
 
         self.u_stage, self.u_tilde, self.u_exp, self.ac, F_arg1, F_arg2, \
             self.k, self.u_arg1, self.u_arg2, F_mass = getFormsNPRK(F, u0, u1, u2, t, dt)
@@ -196,8 +113,8 @@ class NPRKMethod:
         self.us = [Function(V) for _ in range(nprk_tableau.num_stages)]
 
         # BCs can be passed straight through to stage value solvers
-        arg1_prob = NonlinearVariationalProblem(F_arg1, self.u_stage, bcs)
-        arg2_prob = NonlinearVariationalProblem(F_arg2, self.u_stage, bcs)
+        arg_probs = tuple(NonlinearVariationalProblem(F_, self.u_stage, bcs)
+                          for F_ in (F_arg1, F_arg2))
 
         # Additional BCs for mass solvers
         bcs_mass = []
@@ -221,17 +138,24 @@ class NPRKMethod:
             appctx = {**appctx, **appctx_irksome}
 
         # One solver corresponding to each implicit argument
-        self.solvers = {}
-        self.solvers[0] = NonlinearVariationalSolver(arg1_prob, appctx=appctx,
-                                                     solver_parameters=arg1_solver_parameters,
-                                                     nullspace=nullspace)
-        self.solvers[1] = NonlinearVariationalSolver(arg2_prob, appctx=appctx,
-                                                     solver_parameters=arg2_solver_parameters,
-                                                     nullspace=nullspace)
+        self.solvers = tuple(NonlinearVariationalSolver(arg_prb, appctx=appctx,
+                                                        solver_parameters=arg_prms,
+                                                        nullspace=nullspace)
+                             for arg_prb, arg_prms in zip(arg_probs, (arg1_solver_parameters,
+                                                                      arg2_solver_parameters)))
 
         self.mass_solver = NonlinearVariationalSolver(mass_prob,
                                                       solver_parameters=mass_parameters,
                                                       nullspace=nullspace)
+
+        self.num_steps = 0
+
+        # Number of non-linear and linear iterations in solves in each argument
+        self.num_nonlinear_iterations = np.array([0 for _ in self.solvers], dtype=int)
+        self.num_linear_iterations = np.array([0 for _ in self.solvers], dtype=int)
+
+        self.num_mass_nonlinear_iterations = 0
+        self.num_mass_linear_iterations = 0
 
         if self.tableau.is_stiffly_accurate:
             self._finalize = self._finalize_stiffly_accurate
@@ -298,6 +222,8 @@ class NPRKMethod:
             # Store operator evaluation in dictionary
             f_ = fs[tuple(impl_indices[i-1])]
             f_.assign((u_stage - u_tilde)/(dtc * a))
+
+        c.assign(0.0)
 
         self._finalize()
         self.num_steps += 1

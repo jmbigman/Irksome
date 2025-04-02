@@ -287,7 +287,7 @@ class IMIMNPRKTableau(NPRKTableau):
 
     :arg name: Tableau name. Must be 'mp', 'cn', 'stiff2', or 'stiff3'"""
 
-    def __init__(self, name: str = "mp"):
+    def __init__(self, name: str):
         try:
             a, b, stiffly_accurate, order = imim_tableau_dict[name]
         except KeyError:
@@ -297,20 +297,27 @@ class IMIMNPRKTableau(NPRKTableau):
         super().__init__(a, b, order, stiffly_accurate)
 
 
-imex_euler_a = {(1, 1, 0): 1.0}
-imex_euler_b = {(1, 0): 1.0}
-imex_euler_sa = True
-imex_euler_order = 1
+imex_121_a = {(1, 1, 0): 1.0}
+imex_121_b = {(1, 0): 1.0}
+imex_121_sa = True
+imex_121_order = 1
 
-imex_mp_a = {(1, 1, 0): 0.5, (2, 1, 0): 0.5}
-imex_mp_b = {(2, 1): 1.0}
-imex_mp_sa = False
-imex_mp_order = 2
+imex_232a_a = {(1, 1, 0): 1.0 + 1/np.sqrt(2), (2, 1, 0): -2.0 - 3/np.sqrt(2),
+               (2, 2, 1): 1.0 + 1/np.sqrt(2)}
+imex_232a_b = {(2, 1): 1/np.sqrt(2), (3, 2): 1.0 - 1/np.sqrt(2)}
+imex_232a_sa = False
+imex_232a_order = 2
 
-imex_tableau_dict = {"1[21]": (imex_euler_a, imex_euler_b, imex_euler_sa, imex_euler_order),
-                     "euler": (imex_euler_a, imex_euler_b, imex_euler_sa, imex_euler_order),
-                     "2[31]": (imex_mp_a, imex_mp_b, imex_mp_sa, imex_mp_order),
-                     "mp": (imex_mp_a, imex_mp_b, imex_mp_sa, imex_mp_order)}
+imex_232b_a = {(1, 1, 0): 1.0 - 1/np.sqrt(2), (2, 1, 0): -2.0 + 3/np.sqrt(2),
+               (2, 2, 1): 1.0 - 1/np.sqrt(2)}
+imex_232b_b = {(2, 1): -1/np.sqrt(2), (3, 2): 1.0 + 1/np.sqrt(2)}
+imex_232b_sa = False
+imex_232b_order = 2
+
+imex_tableau_dict = {"1[21]": (imex_121_a, imex_121_b, imex_121_sa, imex_121_order),
+                     "euler": (imex_121_a, imex_121_b, imex_121_sa, imex_121_order),
+                     "2[32]a": (imex_232a_a, imex_232a_b, imex_232a_sa, imex_232a_order),
+                     "2[32]b": (imex_232b_a, imex_232b_b, imex_232b_sa, imex_232b_order)}
 
 
 class IMEXNPRKTableau(NPRKTableau):
@@ -318,7 +325,7 @@ class IMEXNPRKTableau(NPRKTableau):
 
     :arg name: Tableau name"""
 
-    def __init__(self, name: str = "mp"):
+    def __init__(self, name: str):
         try:
             a, b, stiffly_accurate, order = imex_tableau_dict[name]
         except KeyError:

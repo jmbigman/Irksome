@@ -44,7 +44,7 @@ To implement this, begin by importing firedrake::
 
 Additionally, a few basic items and the NPRK time stepper are imported from irksome::
 
-   from irksome import Dt, MeshConstant, NPRKMethod
+   from irksome import Dt, MeshConstant, NonlinearlyPartitionedRKTimeStepper
 
 The NPRK tableaux are implemented in :class:`irksome.nprk_tableaux.NPRKTableau`.
 If each argument is treated implicitly on at least one stage, the tableau is considered implicit-implicit (IMIM).
@@ -94,9 +94,9 @@ To define the weak form, two additional :class:`firedrake.Function`'s are needed
 
 The NPRK time stepper is initialized by::
 
-   stepper = NPRKMethod(F, nprk_tableau, t, dt, u, u_1, u_2, bcs=bc)
+   stepper = NonlinearlyPartitionedRKTimeStepper(F, nprk_tableau, t, dt, u, u_1, u_2, bcs=bc)
 
-The values are updated at each stage using the :meth:`~.NPRKMethod.advance` method::
+The values are updated at each stage using the :meth:`~.NonlinearlyPartitionedRKTimeStepper.advance` method::
 
    while (float(t) < 1.0):
       if (float(t) + float(dt) > 1.0):
