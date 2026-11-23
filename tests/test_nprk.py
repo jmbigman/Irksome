@@ -1,3 +1,5 @@
+import numpy as np
+
 from math import isclose
 
 import pytest
@@ -49,8 +51,9 @@ def burgers(nprk_tableau, order, N):
 
 
 @pytest.mark.parametrize("nprk_t", [IMIMNPRKTableau("mp"),
+                                    IMIMNPRKTableau("cn"),
                                     IMEXNPRKTableau("euler")],
-                         ids=["Midpoint", "IMEX Forward Euler"])
+                         ids=["Midpoint", "Crank-Nicholson", "IMEX Forward Euler"])
 def test_1d_burgers(nprk_t):
     order = nprk_t.order
     errs = np.array([burgers(nprk_t, order, 10*2**p) for p in [3, 4]])

@@ -42,8 +42,8 @@ from .stage_value import StageValueTimeStepper
 
 from .multistep import MultistepTimeStepper
 
-from .nprk import NPRKMethod
-from .nprk_tableaux import NPRKTableau
+from .nprk import NonlinearlyPartitionedRKTimeStepper
+from .nprk_tableaux import NPRKTableau, IMEXNPRKTableau, IMIMNPRKTableau
 
 __all__ = [
     "AdamsBashforth",
@@ -84,8 +84,10 @@ __all__ = [
     "ContinuousPetrovGalerkinTimeStepper",
     "DiscontinuousGalerkinTimeStepper",
     "MultistepTimeStepper",
-    "NPRKMethod",
-    "NPRKTableau"
+    "NonlinearlyPartitionedRKTimeStepper",
+    "NPRKTableau",
+    "IMEXNPRKTableau",
+    "IMIMNPRKTableau"
 ]
 
 

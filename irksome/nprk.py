@@ -4,8 +4,10 @@ import numpy as np
 
 from firedrake import Function, NonlinearVariationalProblem, NonlinearVariationalSolver
 
-from .deriv import TimeDerivative, expand_time_derivatives
-from .tools import MeshConstant, replace
+from .ufl.deriv import TimeDerivative, expand_time_derivatives
+
+from .tools import replace
+from .constant import MeshConstant
 from .nprk_tableaux import NPRKTableau
 
 
