@@ -68,6 +68,9 @@ class NonlinearlyPartitionedRKTimeStepper:
     Runge-Kutta (NPRK) method. This requires one form with three functions corresponding to
     the time derivatives/auxiliary terms, the first argument terms and the second argument terms.
 
+    Stage zero is the initial state. Each subsequent stage is implicit in one argument, with
+    the preceding stage in the other. Operator evaluations pair equal or adjacent stages.
+
     :arg F: A :class:`ufl.Form` instance describing partitioned operator F(t, u1, u2) == 0,
              where `u1` and `u2` denote the first and second arguments
     :arg nprk_tableau: A :class:`nprk_tableaux.NPRKTableau` instance giving the NPRK scheme
@@ -98,6 +101,7 @@ class NonlinearlyPartitionedRKTimeStepper:
             bcs = []
 
         self.tableau = nprk_tableau
+        self._validate_tableau()
 
         self.dt = dt
         self.u = u0
@@ -164,6 +168,42 @@ class NonlinearlyPartitionedRKTimeStepper:
         else:
             self._finalize = self._finalize_general
 
+    def _validate_tableau(self):
+        """Check that the tableau fits the sequential stage solver."""
+        tableau = self.tableau
+        rows, first, second = tableau.a_indices.T
+        if np.any(rows == 0):
+            raise ValueError("Stage zero must have no nonzero coefficients")
+        if np.any((first > rows) | (second > rows)):
+            raise ValueError("A stage cannot depend on future stages")
+
+        implicit_in_first = first == rows
+        implicit_in_second = second == rows
+        if np.any(implicit_in_first & implicit_in_second):
+            raise ValueError("A stage cannot be implicit in both arguments")
+
+        implicit_rows = rows[implicit_in_first | implicit_in_second]
+        if (implicit_rows.size != tableau.num_stages - 1
+                or not np.array_equal(implicit_rows, np.arange(1, tableau.num_stages))):
+            raise ValueError("Each noninitial stage must have exactly one implicit term")
+
+        if tableau.b_indices is not None and np.any(tableau.b_indices >= tableau.num_stages):
+            raise ValueError("Output weights must reference existing stages")
+        if not tableau.is_seq_coupled:
+            raise ValueError("Operator evaluations must pair equal or adjacent stages")
+
+    def _evaluate_explicit_pairs(self, stage):
+        """Evaluate the mass-solve pairs that are ready after this stage."""
+        _, c = self.ac
+        for j, k in self.tableau.expl_solve_dict.get(stage, ()):
+            self.u_arg1.assign(self.us[j])
+            self.u_arg2.assign(self.us[k])
+            c.assign(self.tableau.c_values[j])
+            self.mass_solver.solve()
+            self.num_mass_nonlinear_iterations += self.mass_solver.snes.getIterationNumber()
+            self.num_mass_linear_iterations += self.mass_solver.snes.getLinearSolveIterations()
+            self.fs[j, k].assign(self.k)
+
     def advance(self):
         """Takes a single time step"""
 
@@ -172,7 +212,6 @@ class NonlinearlyPartitionedRKTimeStepper:
         coeffs = self.tableau.impl_coeffs
         impl_indices = self.tableau.impl_indices
         a_list = self.tableau.a_list
-        exp_dict = self.tableau.expl_solve_dict
         abscissae = self.tableau.c_values
 
         a, c = self.ac
@@ -183,28 +222,16 @@ class NonlinearlyPartitionedRKTimeStepper:
 
         dtc = float(self.dt)
 
-        self.u_stage.assign(self.u)
-        self.us[0].assign(self.u_stage)
+        u_stage.assign(self.u)
+        self.us[0].assign(u_stage)
+        self._evaluate_explicit_pairs(0)
 
         # Loop over remaining stages
         for i in range(1, ns):
-
-            # Calculate explicit operator evaluations from previous stage
-            for jk in exp_dict.get(i-1, []):
-                j_, k_ = jk[0], jk[1]
-                self.u_arg1.assign(self.us[j_])
-                self.u_arg2.assign(self.us[k_])
-                c.assign(abscissae[j_])
-                self.mass_solver.solve()
-                self.num_mass_nonlinear_iterations += self.mass_solver.snes.getIterationNumber()
-                self.num_mass_linear_iterations += self.mass_solver.snes.getLinearSolveIterations()
-                fs[tuple(jk)].assign(self.k)
-
-            # Assign implicit coefficient and abscissae
+            j, k = impl_indices[i-1]
             a.assign(coeffs[i-1])
-            c.assign(abscissae[impl_indices[i - 1, 0]])
-            # Assign previous stage
-            self.u_exp.assign(u_stage)
+            c.assign(abscissae[j])
+            self.u_exp.assign(self.us[i-1])
 
             # Sum over previous stages
             u_tilde.assign(self.u)
@@ -219,12 +246,10 @@ class NonlinearlyPartitionedRKTimeStepper:
             self.num_nonlinear_iterations[args[i-1]] += self.solvers[args[i-1]].snes.getIterationNumber()
             self.num_linear_iterations[args[i-1]] += self.solvers[args[i-1]].snes.getLinearSolveIterations()
 
-            # Store stage value
+            # Store the stage and its implicit residual before any mass solves.
             self.us[i].assign(u_stage)
-
-            # Store operator evaluation in dictionary
-            f_ = fs[tuple(impl_indices[i-1])]
-            f_.assign((u_stage - u_tilde)/(dtc * a))
+            fs[j, k].assign((u_stage - u_tilde)/(dtc * a))
+            self._evaluate_explicit_pairs(i)
 
         c.assign(0.0)
 

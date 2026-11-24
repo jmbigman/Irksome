@@ -4,32 +4,23 @@ from functools import cached_property
 import numpy as np
 
 
-def _check_tensor(tensor: dict, num_indices: int, name: str = "Tensor",
-                  check_implicit: bool = False):
+def _check_tensor(tensor: dict, num_indices: int, name: str = "Tensor"):
     """Checks Butcher tensor or weighting matrix"""
 
     if not isinstance(tensor, dict):
         raise TypeError(f"{name} must be a dictionary")
+    if not tensor:
+        raise ValueError(f"{name} must contain at least one entry")
 
     for indices, value in tensor.items():
         if not isinstance(indices, tuple):
             raise TypeError(f"{name} keys must be tuples")
-        if not len(indices) == num_indices:
+        if len(indices) != num_indices:
             raise ValueError(f"{name} keys must have {num_indices} indices")
         if not all(isinstance(ind, int) for ind in indices):
             raise TypeError(f"{name} keys must be composed of integers")
-
-        # Check Butcher tensor has the correct implicit structure
-        if check_implicit:
-            if indices[0] == 0:
-                raise ValueError("i > 0 required, explicit first stage enforced")
-
-            if not all(ind <= indices[0] for ind in indices[1:]):
-                raise ValueError("j, k <= i required, cannot depend on future stages")
-            if not indices.count(indices[0]) == 1:
-                raise ValueError("j < i or k < i required, "
-                                 + "must be implicit in exactly one argument")
-
+        if any(ind < 0 for ind in indices):
+            raise ValueError(f"{name} indices must be nonnegative")
         if not isinstance(value, float):
             raise TypeError(f"{name} values must be floats")
 
@@ -92,6 +83,8 @@ class NPRKTableau:
 
         _check_tensor(a, 3, "Butcher tensor")
         self.a_indices, self.a_values = _convert_tensor(a)
+        if not self.a_indices.size:
+            raise ValueError("Butcher tensor must contain a nonzero coefficient")
         self.c_values = self._abscissae()
 
         if not stiffly_accurate:
@@ -154,7 +147,7 @@ class NPRKTableau:
 
     @cached_property
     def impl_args(self):
-        """List of which argument is explicit on each stage"""
+        """List of which argument is implicit on each stage."""
         impl_indices = self.impl_indices
         args = np.array(impl_indices[:, 0] < impl_indices[:, 1], dtype=int)
         return args
@@ -181,20 +174,11 @@ class NPRKTableau:
 
     @cached_property
     def expl_solve_dict(self):
-        """Dictionary of (j,k) indices corresponding to F(Y_j,Y_k) to be calculated
-        at each stage"""
-        expl_indices = self.expl_indices
-
-        expl_solve_dict_ = {}
-
-        for jk in expl_indices:
-            i = np.min(jk)
-            if i in expl_solve_dict_:
-                expl_solve_dict_[i].append(jk)
-            else:
-                expl_solve_dict_[i] = [jk]
-
-        return expl_solve_dict_
+        """Group mass-solve pairs by the stage after which both arguments are available."""
+        pairs_by_stage = {}
+        for pair in self.expl_indices:
+            pairs_by_stage.setdefault(max(pair), []).append(pair)
+        return pairs_by_stage
 
     @cached_property
     def num_stages(self):
@@ -223,9 +207,8 @@ class NPRKTableau:
     @cached_property
     def is_seq_coupled(self):
         """Indicator if the tableau is sequentially coupled"""
-        a_indices = self.a_indices
-        is_sc_ = np.max(np.abs(a_indices[:, 1] - a_indices[:, 2])) == 1
-        return is_sc_
+        pairs = self.all_indices
+        return bool(np.all(np.abs(pairs[:, 0] - pairs[:, 1]) <= 1))
 
 
 # Midpoint and Crank-Nicholson (5.19)
