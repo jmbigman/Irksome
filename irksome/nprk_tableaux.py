@@ -101,16 +101,9 @@ class NPRKTableau:
             self.b_indices, self.b_values = None, None
 
     def _abscissae(self) -> np.ndarray:
-        """Calculates abscissae c_i = sum_{j,k} a_ijk"""
-        unique_i = np.unique(self.a_indices[:, 0])
-        abscissae = np.zeros(unique_i.size, dtype=float)
-
-        # index is array index, i is stage index
-        for index, i in enumerate(unique_i):
-            locs = np.where(self.a_indices[:, 0] == i)[0]
-            abscissae[index] = np.sum(self.a_values[locs])
-
-        return abscissae
+        """Sum the coefficients for each stage, including stage zero."""
+        stage_indices = self.a_indices[:, 0]
+        return np.bincount(stage_indices, weights=self.a_values, minlength=self.num_stages)
 
     @cached_property
     def all_indices(self):
@@ -211,27 +204,15 @@ class NPRKTableau:
 
     @cached_property
     def is_stiffly_accurate(self):
-        """Indicator if tableau is stiffly accurate"""
+        """Return whether the last stage equals the weighted output."""
+        if self._stiffly_accurate:
+            return True
 
-        if not self._stiffly_accurate:
-            a_indices = self.a_indices
-            a_values = self.a_values
-            b_indices = self.b_indices
-            b_values = self.b_values
-
-            i_max = np.max(a_indices[:, 0])
-            locs = np.where(a_indices[:, 0] == i_max)[0]
-
-            sa_check = a_indices[locs, 1:].shape == b_indices.shape
-            sa_check *= a_values[locs].shape == b_values.shape
-
-            if sa_check:
-                sa_check *= np.all(a_indices[locs, 1:] == b_indices)
-                sa_check *= np.allclose(a_values[locs], b_values)
-
-            self._stiffly_accurate = bool(sa_check)
-
-        return self._stiffly_accurate
+        last_row = self.a_indices[:, 0] == self.num_stages - 1
+        return (
+            np.array_equal(self.a_indices[last_row, 1:], self.b_indices)
+            and np.array_equal(self.a_values[last_row], self.b_values)
+        )
 
     @cached_property
     def is_imex(self):
@@ -267,25 +248,15 @@ stiff2_b = None
 stiff2_sa = True
 stiff2_order = 2
 
-# Third-order stiffly accurate scheme
-stiff3_a = {(1, 0, 0): 1/12, (1, 1, 0): 1/4,
-            (2, 0, 0): 1/12, (2, 1, 2): 1/4,
-            (3, 1, 0): -1/2, (3, 1, 2): 5/4, (3, 3, 2): 1/4,
-            (4, 1, 2): 3/4, (4, 3, 4): 1/4}
-stiff3_b = None
-stiff3_sa = True
-stiff3_order = 3
-
 imim_tableau_dict = {"mp": (mp_a, mp_b, mp_sa, mp_order),
                      "cn": (cn_a, cn_b, cn_sa, cn_order),
-                     "stiff2": (stiff2_a, stiff2_b, stiff2_sa, stiff2_order),
-                     "stiff3": (stiff3_a, stiff3_b, stiff3_sa, stiff3_order)}
+                     "stiff2": (stiff2_a, stiff2_b, stiff2_sa, stiff2_order)}
 
 
 class IMIMNPRKTableau(NPRKTableau):
     """Implements various IMIM NPRK tableaux.
 
-    :arg name: Tableau name. Must be 'mp', 'cn', 'stiff2', or 'stiff3'"""
+    :arg name: Tableau name. Must be 'mp', 'cn', or 'stiff2'."""
 
     def __init__(self, name: str):
         try:
@@ -304,13 +275,13 @@ imex_121_order = 1
 
 imex_232a_a = {(1, 1, 0): 1.0 + 1/np.sqrt(2), (2, 1, 0): -2.0 - 3/np.sqrt(2),
                (2, 2, 1): 1.0 + 1/np.sqrt(2)}
-imex_232a_b = {(2, 1): 1/np.sqrt(2), (3, 2): 1.0 - 1/np.sqrt(2)}
+imex_232a_b = {(1, 0): 1/np.sqrt(2), (2, 1): 1.0 - 1/np.sqrt(2)}
 imex_232a_sa = False
 imex_232a_order = 2
 
 imex_232b_a = {(1, 1, 0): 1.0 - 1/np.sqrt(2), (2, 1, 0): -2.0 + 3/np.sqrt(2),
                (2, 2, 1): 1.0 - 1/np.sqrt(2)}
-imex_232b_b = {(2, 1): -1/np.sqrt(2), (3, 2): 1.0 + 1/np.sqrt(2)}
+imex_232b_b = {(1, 0): -1/np.sqrt(2), (2, 1): 1.0 + 1/np.sqrt(2)}
 imex_232b_sa = False
 imex_232b_order = 2
 

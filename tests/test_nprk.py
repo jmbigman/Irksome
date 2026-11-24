@@ -4,7 +4,13 @@ from math import isclose
 
 import pytest
 from firedrake import *
-from irksome import Dt, MeshConstant, NonlinearlyPartitionedRKTimeStepper, IMIMNPRKTableau, IMEXNPRKTableau
+from irksome import Dt, MeshConstant, NonlinearlyPartitionedRKTimeStepper, IMIMNPRKTableau, IMEXNPRKTableau, NPRKTableau
+
+
+@pytest.mark.parametrize("stage_weight, expected", [(1.0, True), (0.999999, False)])
+def test_nprk_stiff_accuracy(stage_weight, expected):
+    tableau = NPRKTableau({(1, 1, 0): stage_weight}, {(1, 0): 1.0}, order=1)
+    assert tableau.is_stiffly_accurate is expected
 
 
 def burgers(nprk_tableau, order, N):
@@ -50,10 +56,14 @@ def burgers(nprk_tableau, order, N):
     return (errornorm(uexact, u) / norm(uexact))
 
 
-@pytest.mark.parametrize("nprk_t", [IMIMNPRKTableau("mp"),
-                                    IMIMNPRKTableau("cn"),
-                                    IMEXNPRKTableau("euler")],
-                         ids=["Midpoint", "Crank-Nicholson", "IMEX Forward Euler"])
+@pytest.mark.parametrize("nprk_t", [
+    pytest.param(IMIMNPRKTableau("mp"), id="Midpoint"),
+    pytest.param(IMIMNPRKTableau("cn"), id="Crank-Nicholson"),
+    pytest.param(IMIMNPRKTableau("stiff2"), id="Stiff-2"),
+    pytest.param(IMEXNPRKTableau("euler"), id="IMEX Forward Euler"),
+    pytest.param(IMEXNPRKTableau("2[32]a"), id="IMEX 2[32]a"),
+    pytest.param(IMEXNPRKTableau("2[32]b"), id="IMEX 2[32]b"),
+])
 def test_1d_burgers(nprk_t):
     order = nprk_t.order
     errs = np.array([burgers(nprk_t, order, 10*2**p) for p in [3, 4]])

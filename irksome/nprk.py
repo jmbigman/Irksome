@@ -194,6 +194,7 @@ class NonlinearlyPartitionedRKTimeStepper:
                 j_, k_ = jk[0], jk[1]
                 self.u_arg1.assign(self.us[j_])
                 self.u_arg2.assign(self.us[k_])
+                c.assign(abscissae[j_])
                 self.mass_solver.solve()
                 self.num_mass_nonlinear_iterations += self.mass_solver.snes.getIterationNumber()
                 self.num_mass_linear_iterations += self.mass_solver.snes.getLinearSolveIterations()
@@ -201,7 +202,7 @@ class NonlinearlyPartitionedRKTimeStepper:
 
             # Assign implicit coefficient and abscissae
             a.assign(coeffs[i-1])
-            c.assign(abscissae[i-1])
+            c.assign(abscissae[impl_indices[i - 1, 0]])
             # Assign previous stage
             self.u_exp.assign(u_stage)
 
